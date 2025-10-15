@@ -1,0 +1,140 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: image-caption-gen
+  ECS_CLUSTER: image-caption-gen-cluster
+  ECS_SERVICE: image-caption-gen-service
+  ENVIRONMENT: prod
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to AWS
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform Init
+        working-directory: ./infra/terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=image-caption/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_STATE_LOCK_TABLE }}"
+
+      - name: Terraform Plan
+        working-directory: ./infra/terraform
+        run: |
+          terraform plan \
+            -var="s3_bucket_name=${{ secrets.S3_BUCKET_NAME }}" \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -var="alarm_email=${{ secrets.ALARM_EMAIL }}" \
+            -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: ./infra/terraform
+        if: github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve tfplan
+
+      - name: Update ECS Service
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }}-${{ env.ENVIRONMENT }} \
+            --service ${{ env.ECS_SERVICE }}-${{ env.ENVIRONMENT }} \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for service stability
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }}-${{ env.ENVIRONMENT }} \
+            --services ${{ env.ECS_SERVICE }}-${{ env.ENVIRONMENT }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Run smoke tests
+        run: |
+          pip install -r requirements.txt
+          pytest tests/e2e_smoke.py -v
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          TEST_USER: ${{ secrets.TEST_USER }}
+          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+
+  rollback:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: failure()
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Rollback ECS Service
+        run: |
+          # Get previous task definition
+          PREVIOUS_TASK_DEF=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }}-${{ env.ENVIRONMENT }} \
+            --services ${{ env.ECS_SERVICE }}-${{ env.ENVIRONMENT }} \
+            --query 'services[0].deployments[1].taskDefinition' \
+            --output text)
+          
+          # Update service to use previous task definition
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }}-${{ env.ENVIRONMENT }} \
+            --service ${{ env.ECS_SERVICE }}-${{ env.ENVIRONMENT }} \
+            --task-definition $PREVIOUS_TASK_DEF \
+            --force-new-deployment
+
+      - name: Notify team
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "Deployment failed and rolled back for commit ${{ github.sha }}"
+            }

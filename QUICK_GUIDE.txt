@@ -1,0 +1,126 @@
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│              🎯 SIMPLIFIED WORKFLOW - ONE BUTTON!           │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+OLD WORKFLOW (CONFUSING) ❌
+═══════════════════════════
+Step 1: Upload image
+Step 2: Generate caption  
+Step 3: Click "Upload to S3" button
+Step 4: REMEMBER to click "Save to DynamoDB" button
+Step 5: Hope you didn't skip a step!
+
+Result: Often skipped Step 4, data not in DynamoDB 😞
+
+
+NEW WORKFLOW (SIMPLE) ✅
+═══════════════════════
+Step 1: Upload image
+Step 2: Generate caption
+Step 3: Click "📤 Upload to S3 & Save to DynamoDB" button
+
+Result: EVERYTHING SAVED AUTOMATICALLY! 🎉
+
+
+┌─────────────────────────────────────────────────────────────┐
+│                     WHAT YOU'LL SEE                         │
+└─────────────────────────────────────────────────────────────┘
+
+1. Upload your image
+   ┌───────────────────────────┐
+   │   📤 Upload your image    │
+   │   [Choose File]           │
+   └───────────────────────────┘
+
+2. See your caption generated
+   ┌───────────────────────────────────────────────────┐
+   │ 🎉 Your Perfect Caption:                          │
+   │ "Making memories one photo at a time • a         │
+   │  beautiful sunset over the ocean 💫"              │
+   └───────────────────────────────────────────────────┘
+
+3. ONE BUTTON TO RULE THEM ALL!
+   ┌─────────────────────────────────────────┐
+   │  [📤 Upload to S3 & Save to DynamoDB]  │ ← CLICK HERE!
+   │        (Big Blue Primary Button)        │
+   └─────────────────────────────────────────┘
+
+4. Watch the magic happen:
+   ⏳ Uploading to S3...
+   ✅ Uploaded to S3!
+   📝 https://your-bucket.s3.amazonaws.com/uploads/...
+   
+   ⏳ Saving to DynamoDB...
+   ✅ Saved to DynamoDB!
+   ℹ️ Image ID: `abc-123-def-456`
+   
+   🎈🎈🎈 [BALLOONS APPEAR!] 🎈🎈🎈
+
+5. Scroll down to verify:
+   ┌─────────────────────────────────────────┐
+   │  📚 Previously Saved Captions           │
+   │  [🔄 Refresh Saved Captions]            │
+   │                                         │
+   │  ✅ Found 4 saved caption(s)            │
+   │                                         │
+   │  📷 Caption #1 - 2025-10-15            │
+   │  📷 Caption #2 - 2025-10-15            │
+   │  📷 Caption #3 - 2025-10-15  ← YOUR NEW ONE!
+   │  📷 Caption #4 - 2025-10-15            │
+   └─────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────┐
+│                   TROUBLESHOOTING                           │
+└─────────────────────────────────────────────────────────────┘
+
+❓ Not seeing success messages?
+   → Check for red error boxes
+   → Verify AWS credentials are configured
+   → Run: aws configure list
+
+❓ Want to verify data was saved?
+   → Method 1: Scroll to "Previously Saved Captions"
+   → Method 2: Run: python check_dynamodb.py
+   → Method 3: Run: python test_dynamodb_save.py
+
+❓ Still using separate buttons?
+   → Refresh your browser (Ctrl+F5)
+   → The old buttons are now in "Advanced Options" expander
+   → Use the main button instead!
+
+❓ Need help?
+   → Read: FIXED_DYNAMODB.md
+   → Read: TROUBLESHOOTING.md
+   → Check AWS Console: DynamoDB → Tables → image_captions
+
+
+┌─────────────────────────────────────────────────────────────┐
+│                      QUICK TEST                             │
+└─────────────────────────────────────────────────────────────┘
+
+To verify everything works:
+
+1. Open app: http://localhost:8501
+
+2. Upload a test image
+
+3. Click the ONE button
+
+4. Open PowerShell and run:
+   python check_dynamodb.py
+
+5. You should see your new item in the list!
+
+
+SUCCESS INDICATORS:
+✅ Green success messages
+✅ Balloons animation 🎈
+✅ Image ID displayed
+✅ Item appears in "Previously Saved Captions"
+✅ check_dynamodb.py shows new item
+
+
+That's it! No more confusion! 🎯

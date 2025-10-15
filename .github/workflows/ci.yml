@@ -1,0 +1,176 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: image-caption-gen
+
+jobs:
+  lint-and-test:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Lint with flake8
+        run: |
+          flake8 backend/ app/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 backend/ app/ --count --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Type check with mypy
+        run: |
+          mypy backend/ --ignore-missing-imports
+        continue-on-error: true
+
+      - name: Run unit tests
+        run: |
+          pytest tests/ -v --cov=backend --cov-report=xml --cov-report=html
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      localstack:
+        image: localstack/localstack:latest
+        env:
+          SERVICES: s3,dynamodb,secretsmanager,cognito-idp
+          DEBUG: 1
+        ports:
+          - 4566:4566
+        options: >-
+          --health-cmd "curl -f http://localhost:4566/_localstack/health || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run integration tests
+        env:
+          AWS_ENDPOINT_URL: http://localhost:4566
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_REGION: us-east-1
+        run: |
+          pytest tests/integration/ -v --maxfail=1
+
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [lint-and-test]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: ${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  terraform-validate:
+    name: Validate Terraform
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform Format Check
+        working-directory: ./infra/terraform
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init
+        working-directory: ./infra/terraform
+        run: terraform init -backend=false
+
+      - name: Terraform Validate
+        working-directory: ./infra/terraform
+        run: terraform validate
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Bandit security scan
+        run: |
+          pip install bandit
+          bandit -r backend/ -f json -o bandit-report.json || true
+
+      - name: Run Safety check
+        run: |
+          pip install safety
+          safety check --json || true
+
+      - name: SAST with Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: auto

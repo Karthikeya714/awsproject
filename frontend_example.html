@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure AI Caption Generator</title>
+    <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-auth.js"></script>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 800px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            background-color: #f5f5f5;
+        }
+        .container { 
+            background: white; 
+            padding: 30px; 
+            border-radius: 10px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .auth-section { 
+            border: 1px solid #ddd; 
+            padding: 20px; 
+            margin: 20px 0; 
+            border-radius: 5px; 
+        }
+        .upload-section {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .upload-section.dragover {
+            border-color: #007bff;
+            background-color: #f0f8ff;
+        }
+        button { 
+            background: #007bff; 
+            color: white; 
+            padding: 10px 20px; 
+            border: none; 
+            border-radius: 5px; 
+            cursor: pointer; 
+            margin: 5px;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        input { 
+            padding: 10px; 
+            margin: 10px 0; 
+            border: 1px solid #ddd; 
+            border-radius: 3px; 
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .caption-result {
+            background: #f8f9fa;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
+        }
+        .error { 
+            color: red; 
+            background: #ffe6e6; 
+            padding: 10px; 
+            border-radius: 5px; 
+        }
+        .success { 
+            color: green; 
+            background: #e6ffe6; 
+            padding: 10px; 
+            border-radius: 5px; 
+        }
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .file-info {
+            background: #e9ecef;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+        .quota-info {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Secure AI Caption Generator</h1>
+        <p>Demonstrates secure authentication with Identity Platform and Cloud Storage integration using signed URLs.</p>
+        
+        <!-- Authentication Section -->
+        <div class="auth-section">
+            <h2>🔑 Authentication</h2>
+            <div id="loginForm">
+                <input type="email" id="email" placeholder="Email" required>
+                <input type="password" id="password" placeholder="Password" required>
+                <button onclick="login()">Sign In</button>
+                <button onclick="signUp()">Sign Up</button>
+            </div>
+            <div id="userInfo" style="display: none;">
+                <p>Welcome, <span id="userName"></span>!</p>
+                <button onclick="logout()">Sign Out</button>
+            </div>
+            <div id="authStatus"></div>
+        </div>
+
+        <!-- File Upload Section -->
+        <div class="upload-section" id="uploadSection" style="display: none;">
+            <h2>📤 Upload Image</h2>
+            <div id="dropZone" ondrop="dropHandler(event)" ondragover="dragOverHandler(event)" ondragleave="dragLeaveHandler(event)">
+                <p>Drag and drop an image here, or</p>
+                <input type="file" id="fileInput" accept="image/*" onchange="handleFileSelect(event)">
+                <button onclick="document.getElementById('fileInput').click()">Choose File</button>
+            </div>
+            <div id="fileInfo"></div>
+            <div id="quotaInfo"></div>
+            
+            <div id="styleSection" style="display: none;">
+                <h3>🎨 Caption Style</h3>
+                <select id="captionStyle">
+                    <option value="Instagram">Instagram</option>
+                    <option value="Funny">Funny</option>
+                    <option value="Poetic">Poetic</option>
+                    <option value="Aesthetic">Aesthetic</option>
+                </select>
+                <button onclick="generateCaption()" id="generateBtn">Generate Caption</button>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div id="resultsSection" style="display: none;">
+            <h2>✨ Results</h2>
+            <div id="imagePreview"></div>
+            <div id="captionResults"></div>
+        </div>
+
+        <!-- User Files Section -->
+        <div id="filesSection" style="display: none;">
+            <h2>📁 My Files</h2>
+            <button onclick="loadUserFiles()">Refresh Files</button>
+            <div id="filesList"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Firebase configuration (replace with your config)
+        const firebaseConfig = {
+            apiKey: "your-api-key",
+            authDomain: "your-project.firebaseapp.com",
+            projectId: "your-project-id",
+            storageBucket: "your-project.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "your-app-id"
+        };
+
+        // Initialize Firebase
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js';
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.0.0/firebase-auth.js';
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+
+        // Backend API base URL
+        const API_BASE = 'http://localhost:5000';
+
+        let currentUser = null;
+        let backendToken = null;
+        let currentFile = null;
+        let currentBlobName = null;
+
+        // Auth state observer
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUser = user;
+                showUserInfo(user);
+                authenticateWithBackend(user);
+            } else {
+                currentUser = null;
+                backendToken = null;
+                showLoginForm();
+            }
+        });
+
+        window.login = async () => {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+            } catch (error) {
+                showStatus('Login failed: ' + error.message, 'error');
+            }
+        };
+
+        window.signUp = async () => {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                await createUserWithEmailAndPassword(auth, email, password);
+            } catch (error) {
+                showStatus('Sign up failed: ' + error.message, 'error');
+            }
+        };
+
+        window.logout = async () => {
+            try {
+                await signOut(auth);
+            } catch (error) {
+                showStatus('Logout failed: ' + error.message, 'error');
+            }
+        };
+
+        async function authenticateWithBackend(user) {
+            try {
+                const idToken = await user.getIdToken();
+                
+                const response = await fetch(`${API_BASE}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ idToken })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    backendToken = data.access_token;
+                    showStatus('Backend authentication successful!', 'success');
+                    showUploadSection();
+                    showQuotaInfo(data.quota);
+                } else {
+                    const error = await response.json();
+                    showStatus('Backend auth failed: ' + error.error, 'error');
+                }
+            } catch (error) {
+                showStatus('Backend auth error: ' + error.message, 'error');
+            }
+        }
+
+        function showLoginForm() {
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('userInfo').style.display = 'none';
+            document.getElementById('uploadSection').style.display = 'none';
+            document.getElementById('filesSection').style.display = 'none';
+        }
+
+        function showUserInfo(user) {
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('userInfo').style.display = 'block';
+            document.getElementById('userName').textContent = user.email;
+        }
+
+        function showUploadSection() {
+            document.getElementById('uploadSection').style.display = 'block';
+            document.getElementById('filesSection').style.display = 'block';
+        }
+
+        function showStatus(message, type = 'info') {
+            const statusEl = document.getElementById('authStatus');
+            statusEl.innerHTML = `<div class="${type}">${message}</div>`;
+            setTimeout(() => statusEl.innerHTML = '', 5000);
+        }
+
+        function showQuotaInfo(quota) {
+            if (!quota) return;
+            
+            const quotaEl = document.getElementById('quotaInfo');
+            const usagePercent = Math.round(quota.usage_percentage);
+            const usedMB = Math.round(quota.current_usage_bytes / (1024 * 1024));
+            const totalMB = Math.round(quota.quota_bytes / (1024 * 1024));
+            
+            quotaEl.innerHTML = `
+                <div class="quota-info">
+                    <strong>Storage Quota:</strong> ${usedMB}MB / ${totalMB}MB (${usagePercent}%)
+                    <div style="width: 100%; height: 8px; background: #e0e0e0; border-radius: 4px; margin-top: 5px;">
+                        <div style="width: ${usagePercent}%; height: 100%; background: ${usagePercent > 80 ? '#ff4444' : '#007bff'}; border-radius: 4px;"></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // File handling
+        window.dragOverHandler = (ev) => {
+            ev.preventDefault();
+            document.getElementById('dropZone').classList.add('dragover');
+        };
+
+        window.dragLeaveHandler = (ev) => {
+            document.getElementById('dropZone').classList.remove('dragover');
+        };
+
+        window.dropHandler = (ev) => {
+            ev.preventDefault();
+            document.getElementById('dropZone').classList.remove('dragover');
+            
+            const files = ev.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        };
+
+        window.handleFileSelect = (ev) => {
+            const files = ev.target.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        };
+
+        async function handleFile(file) {
+            if (!file.type.startsWith('image/')) {
+                showStatus('Please select an image file', 'error');
+                return;
+            }
+
+            currentFile = file;
+            
+            // Show file info
+            document.getElementById('fileInfo').innerHTML = `
+                <div class="file-info">
+                    <strong>File:</strong> ${file.name}<br>
+                    <strong>Size:</strong> ${Math.round(file.size / 1024)}KB<br>
+                    <strong>Type:</strong> ${file.type}
+                </div>
+            `;
+
+            // Show style selection
+            document.getElementById('styleSection').style.display = 'block';
+
+            // Upload file
+            await uploadFile(file);
+        }
+
+        async function uploadFile(file) {
+            if (!backendToken) {
+                showStatus('Please authenticate first', 'error');
+                return;
+            }
+
+            try {
+                // Get upload URL
+                const uploadUrlResponse = await fetch(`${API_BASE}/storage/upload-url`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${backendToken}`
+                    },
+                    body: JSON.stringify({
+                        filename: file.name,
+                        contentType: file.type,
+                        fileSize: file.size
+                    })
+                });
+
+                if (!uploadUrlResponse.ok) {
+                    const error = await uploadUrlResponse.json();
+                    throw new Error(error.error);
+                }
+
+                const uploadData = await uploadUrlResponse.json();
+                currentBlobName = uploadData.blob_name;
+
+                // Upload file directly to Cloud Storage
+                const uploadResponse = await fetch(uploadData.upload_url, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': file.type },
+                    body: file
+                });
+
+                if (uploadResponse.ok) {
+                    showStatus('File uploaded successfully!', 'success');
+                    
+                    // Show preview
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        document.getElementById('imagePreview').innerHTML = `
+                            <img src="${e.target.result}" style="max-width: 300px; max-height: 300px; border-radius: 5px;">
+                        `;
+                    };
+                    reader.readAsDataURL(file);
+                    
+                    document.getElementById('resultsSection').style.display = 'block';
+                } else {
+                    throw new Error('Upload failed');
+                }
+
+            } catch (error) {
+                showStatus('Upload error: ' + error.message, 'error');
+            }
+        }
+
+        window.generateCaption = async () => {
+            if (!backendToken || !currentBlobName) {
+                showStatus('Please upload an image first', 'error');
+                return;
+            }
+
+            const generateBtn = document.getElementById('generateBtn');
+            generateBtn.disabled = true;
+            generateBtn.innerHTML = '<span class="loading"></span> Generating...';
+
+            try {
+                const style = document.getElementById('captionStyle').value;
+                
+                const response = await fetch(`${API_BASE}/ai/generate-caption`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${backendToken}`
+                    },
+                    body: JSON.stringify({
+                        blobName: currentBlobName,
+                        style: style
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    document.getElementById('captionResults').innerHTML = `
+                        <div class="caption-result">
+                            <h4>🤖 AI Analysis:</h4>
+                            <p><em>"${data.basic_caption}"</em></p>
+                        </div>
+                        <div class="caption-result">
+                            <h4>✨ ${style} Caption:</h4>
+                            <p><strong>${data.styled_caption}</strong></p>
+                            <button onclick="copyToClipboard('${data.styled_caption.replace(/'/g, "\\'")}')">Copy Caption</button>
+                        </div>
+                    `;
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.error);
+                }
+
+            } catch (error) {
+                showStatus('Caption generation failed: ' + error.message, 'error');
+            } finally {
+                generateBtn.disabled = false;
+                generateBtn.innerHTML = 'Generate Caption';
+            }
+        };
+
+        window.copyToClipboard = (text) => {
+            navigator.clipboard.writeText(text).then(() => {
+                showStatus('Caption copied to clipboard!', 'success');
+            });
+        };
+
+        window.loadUserFiles = async () => {
+            if (!backendToken) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/user/files`, {
+                    headers: { 'Authorization': `Bearer ${backendToken}` }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    const filesHTML = data.files.map(file => `
+                        <div class="file-info">
+                            <strong>${file.name}</strong><br>
+                            Size: ${Math.round((file.size || 0) / 1024)}KB | 
+                            Created: ${new Date(file.time_created).toLocaleString()}
+                        </div>
+                    `).join('');
+
+                    document.getElementById('filesList').innerHTML = `
+                        <p>Total files: ${data.total_files}</p>
+                        ${filesHTML}
+                    `;
+
+                    showQuotaInfo(data.quota);
+                }
+            } catch (error) {
+                showStatus('Failed to load files: ' + error.message, 'error');
+            }
+        };
+    </script>
+</body>
+</html>

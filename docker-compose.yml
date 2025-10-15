@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8501:8501"
+    environment:
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - S3_BUCKET=${S3_BUCKET:-image-caption-dev}
+      - DYNAMODB_TABLE=${DYNAMODB_TABLE:-image_captions}
+      - COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID}
+      - COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
+      - CAPTION_PROVIDER=${CAPTION_PROVIDER:-bedrock}
+      - BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID:-anthropic.claude-3-sonnet-20240229-v1:0}
+      - USE_REKOGNITION=${USE_REKOGNITION:-true}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    volumes:
+      - ./backend:/app/backend
+      - ./app:/app/app
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # LocalStack for local AWS services testing
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"
+      - "4571:4571"
+    environment:
+      - SERVICES=s3,dynamodb,secretsmanager,cognito-idp,rekognition
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - "${TMPDIR:-/tmp}/localstack:/tmp/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
